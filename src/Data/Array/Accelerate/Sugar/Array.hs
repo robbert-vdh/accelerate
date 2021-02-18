@@ -36,6 +36,7 @@ import System.IO.Unsafe
 
 import GHC.Exts                                                     ( IsList, IsString )
 import GHC.Generics
+import GHC.Stack
 import qualified GHC.Exts                                           as GHC
 
 -- $setup
@@ -97,12 +98,14 @@ newtype Array sh e = Array (R.Array (EltR sh) (EltR e))
   deriving Typeable
 
 instance (Shape sh, Elt e, Eq sh, Eq e) => Eq (Array sh e) where
-  arr1 == arr2 = shape arr1 == shape arr2 && toList arr1 == toList arr2
-  arr1 /= arr2 = shape arr1 /= shape arr2 || toList arr1 /= toList arr2
+  arr1 == arr2 = withFrozenCallStack $ shape arr1 == shape arr2 && toList arr1 == toList arr2
+  arr1 /= arr2 = withFrozenCallStack $ shape arr1 /= shape arr2 || toList arr1 /= toList arr2
 
 instance (Shape sh, Elt e, Show e) => Show (Array sh e) where
   show (Array arr) = R.showArray (shows . toElt @e) (arrayR @sh @e) arr
 
+-- TODO: It's likely not very important here, but like Prelude type classes we
+--       cannot freeze call stacks here directly
 instance Elt e => IsList (Vector e) where
   type Item (Vector e) = e
   toList      = toList
@@ -135,53 +138,54 @@ instance (Shape sh, Elt e) => NFData (Array sh e) where
 
 -- | Yield an array's shape
 --
-shape :: Shape sh => Array sh e -> sh
-shape (Array arr) = toElt (R.shape arr)
+shape :: (HasCallStack, Shape sh) => Array sh e -> sh
+shape (Array arr) = withFrozenCallStack $ toElt (R.shape arr)
 
 -- | Change the shape of an array without altering its contents. The 'size' of
 -- the source and result arrays must be identical.
 --
-reshape :: forall sh sh' e. (Shape sh, Shape sh') => sh -> Array sh' e -> Array sh e
-reshape sh (Array arr) = Array $ R.reshape (shapeR @sh) (fromElt sh) (shapeR @sh') arr
+reshape :: forall sh sh' e. (HasCallStack, Shape sh, Shape sh') => sh -> Array sh' e -> Array sh e
+reshape sh (Array arr) = withFrozenCallStack $ Array $ R.reshape (shapeR @sh) (fromElt sh) (shapeR @sh') arr
 
 -- | Return the value of an array at the given multidimensional index
 --
 infixl 9 !
-(!) :: forall sh e. (Shape sh, Elt e) => Array sh e -> sh -> e
-(!) (Array arr) ix = toElt $ R.indexArray (arrayR @sh @e) arr (fromElt ix)
+(!) :: forall sh e. (HasCallStack, Shape sh, Elt e) => Array sh e -> sh -> e
+(!) (Array arr) ix = withFrozenCallStack $ toElt $ R.indexArray (arrayR @sh @e) arr (fromElt ix)
 
 -- | Return the value of an array at given the linear (row-major) index
 --
 infixl 9 !!
-(!!) :: forall sh e. Elt e => Array sh e -> Int -> e
-(!!) (Array arr) i = toElt $ R.linearIndexArray (eltR @e) arr i
+(!!) :: forall sh e. (HasCallStack, Elt e) => Array sh e -> Int -> e
+(!!) (Array arr) i = withFrozenCallStack $ toElt $ R.linearIndexArray (eltR @e) arr i
 
 -- | Create an array from its representation function, applied at each
 -- index of the array
 --
-fromFunction :: (Shape sh, Elt e) => sh -> (sh -> e) -> Array sh e
-fromFunction sh f = unsafePerformIO $! fromFunctionM sh (return . f)
+fromFunction :: (HasCallStack, Shape sh, Elt e) => sh -> (sh -> e) -> Array sh e
+fromFunction sh f = withFrozenCallStack $ unsafePerformIO $! fromFunctionM sh (return . f)
 
 -- | Create an array using a monadic function applied at each index
 --
 -- @since 1.2.0.0
 --
-fromFunctionM :: forall sh e. (Shape sh, Elt e) => sh -> (sh -> IO e) -> IO (Array sh e)
-fromFunctionM sh f = Array <$> R.fromFunctionM (arrayR @sh @e) (fromElt sh) f'
+fromFunctionM :: forall sh e. (HasCallStack, Shape sh, Elt e) => sh -> (sh -> IO e) -> IO (Array sh e)
+fromFunctionM sh f = withFrozenCallStack $ Array <$> R.fromFunctionM (arrayR @sh @e) (fromElt sh) f'
   where
+    f' :: HasCallStack => EltR sh -> IO (EltR e)
     f' x = do
       y <- f (toElt x)
       return (fromElt y)
 
 -- | Create a vector from the concatenation of the given list of vectors
 --
-concatVectors :: forall e. Elt e => [Vector e] -> Vector e
-concatVectors = toArr . R.concatVectors (eltR @e) . map fromArr
+concatVectors :: forall e. (HasCallStack, Elt e) => [Vector e] -> Vector e
+concatVectors = withFrozenCallStack $ toArr . R.concatVectors (eltR @e) . map fromArr
 
 -- | Creates a new, uninitialized Accelerate array
 --
-allocateArray :: forall sh e. (Shape sh, Elt e) => sh -> IO (Array sh e)
-allocateArray sh = Array <$> R.allocateArray (arrayR @sh @e) (fromElt sh)
+allocateArray :: forall sh e. (HasCallStack, Shape sh, Elt e) => sh -> IO (Array sh e)
+allocateArray sh = withFrozenCallStack $ Array <$> R.allocateArray (arrayR @sh @e) (fromElt sh)
 
 -- | Convert elements of a list into an Accelerate 'Array'
 --
@@ -213,14 +217,17 @@ allocateArray sh = Array <$> R.allocateArray (arrayR @sh @e) (fromElt sh)
 -- and then traversing it a second time to collect the elements into the array,
 -- thus forcing the spine of the list to be manifest on the heap.
 --
-fromList :: forall sh e. (Shape sh, Elt e) => sh -> [e] -> Array sh e
-fromList sh xs = toArr $ R.fromList (arrayR @sh @e) (fromElt sh) $ map fromElt xs
+fromList :: forall sh e. (HasCallStack, Shape sh, Elt e) => sh -> [e] -> Array sh e
+fromList sh xs = withFrozenCallStack $ toArr $ R.fromList (arrayR @sh @e) (fromElt sh) $ map fromElt xs
 
 -- | Convert an accelerated 'Array' to a list in row-major order
 --
-toList :: forall sh e. (Shape sh, Elt e) => Array sh e -> [e]
-toList = map toElt . R.toList (arrayR @sh @e) . fromArr
+toList :: forall sh e. (HasCallStack, Shape sh, Elt e) => Array sh e -> [e]
+toList = withFrozenCallStack $ map toElt . R.toList (arrayR @sh @e) . fromArr
 
+-- TODO: Figure out if call stacks here are important, probably not (we don't
+--       track call stacks for functions that only operate on the structure of
+--       an embedded type and don't generate any constructors)
 
 -- | The 'Arrays' class characterises the types which can appear in collective
 -- Accelerate computations of type 'Data.Array.Accelerate.Acc'.
