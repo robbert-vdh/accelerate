@@ -291,7 +291,7 @@ mkConS tn' tvs' prev' next' tag' con' = do
       fun <- newName ("_build" ++ cn)
       xs  <- replicateM (length fs) (newName "_x")
       let
-        vs    = foldl' (\es e -> [| SmartExp ($es `Pair` $e) |]) [| SmartExp Nil |]
+        vs    = foldl' (\es e -> [| SmartExp ($es `Pair` $e) |]) [| SmartExp (Nil mkAnn) |]
               $  map (\t -> [| unExp (undef @ $(return t)) |] ) (concat (reverse fs0))
               ++ map varE xs
               ++ map (\t -> [| unExp (undef @ $(return t)) |] ) (concat fs1)
