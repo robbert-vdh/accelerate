@@ -159,6 +159,9 @@ import Prelude
 import GHC.TypeLits
 
 
+-- TODO: Like in the smart AST, add missing annotations to the constructors
+
+
 -- Array expressions
 -- -----------------
 
@@ -364,7 +367,8 @@ data PreOpenAcc (acc :: Type -> Type -> Type) aenv a where
   -- Fold along the innermost dimension of an array with a given
   -- /associative/ function.
   --
-  Fold        :: Fun            aenv (e -> e -> e)              -- combination function
+  Fold        :: Ann
+              -> Fun            aenv (e -> e -> e)              -- combination function
               -> Maybe     (Exp aenv e)                         -- default value
               -> acc            aenv (Array (sh, Int) e)        -- folded array
               -> PreOpenAcc acc aenv (Array sh e)
@@ -796,7 +800,7 @@ instance HasArraysR acc => HasArraysR (PreOpenAcc acc) where
                                          in arraysRarray sh tR
   arraysR (ZipWith tR _ a _)          = let ArrayR sh _ = arrayR a
                                          in arraysRarray sh tR
-  arraysR (Fold _ _ a)                = let ArrayR (ShapeRsnoc sh) tR = arrayR a
+  arraysR (Fold _ _ _ a)              = let ArrayR (ShapeRsnoc sh) tR = arrayR a
                                          in arraysRarray sh tR
   arraysR (FoldSeg _ _ _ a _)         = arraysR a
   arraysR (Scan _ _ _ a)              = arraysR a
@@ -1014,7 +1018,7 @@ rnfPreOpenAcc rnfA pacc =
     Slice slice a sh          -> rnfSliceIndex slice `seq` rnfE sh `seq` rnfA a
     Map ann tp f a            -> rnfAnn ann `seq` rnfTypeR tp `seq` rnfF f `seq` rnfA a
     ZipWith tp f a1 a2        -> rnfTypeR tp `seq` rnfF f `seq` rnfA a1 `seq` rnfA a2
-    Fold f z a                -> rnfF f `seq` rnfMaybe rnfE z `seq` rnfA a
+    Fold ann f z a            -> rnfAnn ann `seq` rnfF f `seq` rnfMaybe rnfE z `seq` rnfA a
     FoldSeg i f z a s         -> rnfIntegralType i `seq` rnfF f `seq` rnfMaybe rnfE z `seq` rnfA a `seq` rnfA s
     Scan d f z a              -> d `seq` rnfF f `seq` rnfMaybe rnfE z `seq` rnfA a
     Scan' d f z a             -> d `seq` rnfF f `seq` rnfE z `seq` rnfA a
@@ -1222,7 +1226,7 @@ liftPreOpenAcc liftA pacc =
     Slice slix a sh           -> [|| Slice $$(liftSliceIndex slix) $$(liftA a) $$(liftE sh) ||]
     Map ann tp f a            -> [|| Map $$(liftAnn ann) $$(liftTypeR tp) $$(liftF f) $$(liftA a) ||]
     ZipWith tp f a b          -> [|| ZipWith $$(liftTypeR tp) $$(liftF f) $$(liftA a) $$(liftA b) ||]
-    Fold f z a                -> [|| Fold $$(liftF f) $$(liftMaybe liftE z) $$(liftA a) ||]
+    Fold ann f z a            -> [|| Fold $$(liftAnn ann) $$(liftF f) $$(liftMaybe liftE z) $$(liftA a) ||]
     FoldSeg i f z a s         -> [|| FoldSeg $$(liftIntegralType i) $$(liftF f) $$(liftMaybe liftE z) $$(liftA a) $$(liftA s) ||]
     Scan d f z a              -> [|| Scan  $$(liftDirection d) $$(liftF f) $$(liftMaybe liftE z) $$(liftA a) ||]
     Scan' d f z a             -> [|| Scan' $$(liftDirection d) $$(liftF f) $$(liftE z) $$(liftA a) ||]
@@ -1400,6 +1404,7 @@ liftPrimFun (PrimFromIntegral ta tb)   = [|| PrimFromIntegral $$(liftIntegralTyp
 liftPrimFun (PrimToFloating ta tb)     = [|| PrimToFloating $$(liftNumType ta) $$(liftFloatingType tb) ||]
 
 
+-- TODO: Show annotations
 showPreAccOp :: forall acc aenv arrs. PreOpenAcc acc aenv arrs -> String
 showPreAccOp Alet{}              = "Alet"
 showPreAccOp (Avar (Var _ ix))   = "Avar a" ++ show (idxToInt ix)
@@ -1419,7 +1424,7 @@ showPreAccOp Replicate{}         = "Replicate"
 showPreAccOp Slice{}             = "Slice"
 showPreAccOp Map{}               = "Map"
 showPreAccOp ZipWith{}           = "ZipWith"
-showPreAccOp (Fold _ z _)        = "Fold" ++ maybe "1" (const "") z
+showPreAccOp (Fold _ _ z _)      = "Fold" ++ maybe "1" (const "") z
 showPreAccOp (FoldSeg _ _ z _ _) = "Fold" ++ maybe "1" (const "") z ++ "Seg"
 showPreAccOp (Scan d _ z _)      = "Scan" ++ showsDirection d (maybe "1" (const "") z)
 showPreAccOp (Scan' d _ _ _)     = "Scan" ++ showsDirection d "'"
