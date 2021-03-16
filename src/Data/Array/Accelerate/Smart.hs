@@ -407,7 +407,8 @@ data PreSmartAcc acc exp as where
                 -> acc (Array sh e2)
                 -> PreSmartAcc acc exp (Array sh e3)
 
-  Fold          :: TypeR e
+  Fold          :: Ann
+                -> TypeR e
                 -> (SmartExp e -> SmartExp e -> exp e)
                 -> Maybe (exp e)
                 -> acc (Array (sh, Int) e)
@@ -829,7 +830,7 @@ instance HasArraysR acc => HasArraysR (PreSmartAcc acc exp) where
                                  in  TupRsingle $ ArrayR shr tp
     ZipWith _ _ tp _ a _      -> let ArrayR shr _ = arrayR a
                                  in  TupRsingle $ ArrayR shr tp
-    Fold _ _ _ a              -> let ArrayR (ShapeRsnoc shr) tp = arrayR a
+    Fold _ _ _ _ a            -> let ArrayR (ShapeRsnoc shr) tp = arrayR a
                                  in  TupRsingle (ArrayR shr tp)
     FoldSeg _ _ _ _ a _       -> arraysR a
     Scan _ _ _ _ a            -> arraysR a
@@ -1367,7 +1368,7 @@ showPreAccOp Replicate{}           = "Replicate"
 showPreAccOp Slice{}               = "Slice"
 showPreAccOp Map{}                 = "Map"
 showPreAccOp ZipWith{}             = "ZipWith"
-showPreAccOp (Fold _ _ z _)        = "Fold" ++ maybe "1" (const "") z
+showPreAccOp (Fold _ _ _ z _)      = "Fold" ++ maybe "1" (const "") z
 showPreAccOp (FoldSeg _ _ _ z _ _) = "Fold" ++ maybe "1" (const "") z ++ "Seg"
 showPreAccOp (Scan d _ _ z _)      = "Scan" ++ showsDirection d (maybe "1" (const "") z)
 showPreAccOp (Scan' d _ _ _ _)     = "Scan" ++ showsDirection d "'"
